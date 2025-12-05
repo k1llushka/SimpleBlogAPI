@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SimpleBlog.API.Data;
 using System.Net.Http.Json;
 using Xunit;
+using SimpleBlog.API.Models;
 
 public class PostsControllerTests : IClassFixture<WebApplicationFactory<Program>>
 {
