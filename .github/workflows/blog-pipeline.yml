@@ -8,33 +8,26 @@ on:
 
 env:
   DOTNET_VERSION: '8.0.x'
-  SOLUTION_FILE: 'SimpleBlogAPI.sln'
 
 jobs:
   # Джоба 1: Проверка и сборка
   build-and-test:
     name: 🔨 Сборка и тестирование
-    runs-on: windows-latest  # Используем Windows runner
+    runs-on: windows-latest
 
     steps:
     - name: 📥 Загружаем код
       uses: actions/checkout@v4
 
-    - name: 📁 Показываем структуру (для отладки)
+    - name: 📁 Показываем структуру проекта
       shell: pwsh
       run: |
-        Write-Host "📁 Текущая директория: $(Get-Location)" -ForegroundColor Cyan
-        Write-Host "📁 Содержимое:" -ForegroundColor Cyan
-        Get-ChildItem -Force
+        Write-Host "📁 Текущая директория: $(pwd)" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "📁 Содержимое src/:" -ForegroundColor Cyan
-        Get-ChildItem -Path src -Force -ErrorAction SilentlyContinue
-        Write-Host ""
-        Write-Host "📁 Файлы проекта:" -ForegroundColor Cyan
-        Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object { Write-Host "  - $($_.FullName)" }
-        Write-Host ""
-        Write-Host "📁 Файлы решения:" -ForegroundColor Cyan
-        Get-ChildItem -Filter *.sln
+        Write-Host "📁 Полная структура проекта:" -ForegroundColor Cyan
+        Get-ChildItem -Recurse | Where-Object { $_.Name -match '\.(csproj|sln)$' } | ForEach-Object {
+          Write-Host "  • $($_.FullName)" -ForegroundColor Gray
+        }
 
     - name: ⚙️ Устанавливаем .NET
       uses: actions/setup-dotnet@v3
@@ -46,169 +39,154 @@ jobs:
       run: |
         Write-Host "📦 Восстанавливаем зависимости..." -ForegroundColor Green
         
-        # Проверяем наличие solution файла
-        if (Test-Path ${{ env.SOLUTION_FILE }}) {
-          Write-Host "✅ Найден solution файл: ${{ env.SOLUTION_FILE }}" -ForegroundColor Green
-          dotnet restore ${{ env.SOLUTION_FILE }}
-        } else {
-          Write-Host "⚠️ Solution файл не найден, ищем .csproj файлы" -ForegroundColor Yellow
-          
-          # Ищем все csproj файлы
-          $projFiles = Get-ChildItem -Recurse -Filter *.csproj
-          if ($projFiles.Count -gt 0) {
-            Write-Host "✅ Найдены проекты:" -ForegroundColor Green
-            $projFiles | ForEach-Object { Write-Host "  - $($_.Name)" }
-            
-            # Восстанавливаем каждый проект
-            foreach ($proj in $projFiles) {
-              Write-Host "📦 Восстанавливаем $($proj.Name)..." -ForegroundColor Cyan
-              dotnet restore $proj.FullName
-            }
-          } else {
-            Write-Host "❌ Файлы проекта не найдены!" -ForegroundColor Red
-            exit 1
+        # Ищем все csproj файлы
+        $projFiles = Get-ChildItem -Recurse -Filter *.csproj
+        if ($projFiles.Count -gt 0) {
+          Write-Host "✅ Найдены проекты:" -ForegroundColor Green
+          foreach ($proj in $projFiles) {
+            Write-Host "  📦 $($proj.FullName)" -ForegroundColor Gray
+            dotnet restore $proj.FullName
           }
+        } else {
+          Write-Host "❌ Файлы проекта не найдены!" -ForegroundColor Red
+          exit 1
         }
 
-    - name: 🔨 Собираем проект
+    - name: 🔨 Собираем проект (ПРАВИЛЬНЫЙ ВАРИАНТ)
       shell: pwsh
       run: |
         Write-Host "🔨 Собираем проект..." -ForegroundColor Green
         
-        if (Test-Path ${{ env.SOLUTION_FILE }}) {
-          Write-Host "🔨 Сборка solution..." -ForegroundColor Cyan
-          dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore
+        # ВАРИАНТ 1: Собираем конкретный проект
+        $mainProject = Get-ChildItem -Recurse -Filter *.csproj | Where-Object { $_.Name -match 'SimpleBlog\.API' } | Select-Object -First 1
+        
+        if ($mainProject) {
+          Write-Host "🔨 Сборка основного проекта: $($mainProject.FullName)" -ForegroundColor Cyan
+          dotnet build $mainProject.FullName --configuration Release --no-restore
         } else {
-          Write-Host "🔨 Сборка всех проектов..." -ForegroundColor Cyan
-          dotnet build --configuration Release --no-restore
+          # ВАРИАНТ 2: Собираем все проекты из текущей папки
+          Write-Host "🔨 Сборка всех проектов в текущей папке..." -ForegroundColor Cyan
+          Get-ChildItem -Filter *.csproj | ForEach-Object {
+            Write-Host "  🔨 Собираем $($_.Name)..." -ForegroundColor Gray
+            dotnet build $_ --configuration Release --no-restore
+          }
         }
         
         Write-Host "✅ Сборка завершена!" -ForegroundColor Green
+
+    - name: 📁 Проверяем результаты сборки
+      shell: pwsh
+      run: |
+        Write-Host "📁 Проверяем результаты сборки..." -ForegroundColor Cyan
         
-        # Показываем результаты сборки
-        Write-Host ""
-        Write-Host "📁 Результаты сборки:" -ForegroundColor Cyan
-        Get-ChildItem -Recurse -Path "bin\Release" -Filter *.dll -ErrorAction SilentlyContinue | 
-          Select-Object -First 10 Name, Directory |
-          ForEach-Object { Write-Host "  - $($_.Name) в $($_.Directory)" }
+        # Ищем собранные файлы
+        $buildOutputs = Get-ChildItem -Recurse -Path "bin" -Filter *.dll -ErrorAction SilentlyContinue
+        if ($buildOutputs.Count -gt 0) {
+          Write-Host "✅ Найдены собранные файлы:" -ForegroundColor Green
+          $buildOutputs | Group-Object Directory | ForEach-Object {
+            Write-Host "  📁 $($_.Name)" -ForegroundColor Gray
+            $_.Group | Select-Object -First 3 | ForEach-Object {
+              Write-Host "    • $($_.Name)" -ForegroundColor DarkGray
+            }
+            if ($_.Count -gt 3) { Write-Host "    • ... и еще $($_.Count - 3) файлов" -ForegroundColor DarkGray }
+          }
+        } else {
+          Write-Host "⚠️ Собранные файлы не найдены" -ForegroundColor Yellow
+        }
 
     - name: 🧪 Запускаем тесты
       shell: pwsh
       run: |
         Write-Host "🧪 Запускаем тесты..." -ForegroundColor Green
         
-        # Создаем папку для результатов тестов
+        # Создаем папку для результатов
         New-Item -ItemType Directory -Force -Path TestResults | Out-Null
         
         # Ищем тестовые проекты
         $testProjects = Get-ChildItem -Recurse -Filter *.csproj | 
-                        Where-Object { $_.Name -match "Test" -or $_.Directory.Name -match "Test" }
+                        Where-Object { $_.Name -match "Test" }
         
         if ($testProjects.Count -gt 0) {
           Write-Host "✅ Найдены тестовые проекты:" -ForegroundColor Green
-          $testProjects | ForEach-Object { Write-Host "  - $($_.Name)" }
           
           foreach ($testProj in $testProjects) {
             Write-Host ""
-            Write-Host "🧪 Тестируем $($testProj.Name)..." -ForegroundColor Cyan
+            Write-Host "🧪 Тестируем проект: $($testProj.Name)" -ForegroundColor Cyan
+            Write-Host "  📍 Путь: $($testProj.FullName)" -ForegroundColor Gray
             
             # Unit тесты
-            Write-Host "  🔹 Unit тесты..." -ForegroundColor Gray
-            dotnet test $testProj.FullName --verbosity normal `
+            Write-Host "  🔹 Запускаем unit-тесты..." -ForegroundColor Gray
+            dotnet test $testProj.FullName `
+              --verbosity normal `
               --logger "trx;LogFileName=$($testProj.BaseName)-unit.trx" `
               --results-directory TestResults `
-              --no-restore
+              --no-restore `
+              --filter "Category!=Integration"
             
-            # Интеграционные тесты (если есть)
-            Write-Host "  🔗 Интеграционные тесты..." -ForegroundColor Gray
-            dotnet test $testProj.FullName --verbosity normal `
+            # Интеграционные тесты
+            Write-Host "  🔗 Запускаем интеграционные тесты..." -ForegroundColor Gray
+            dotnet test $testProj.FullName `
+              --verbosity normal `
               --filter "Category=Integration" `
               --logger "trx;LogFileName=$($testProj.BaseName)-integration.trx" `
               --results-directory TestResults `
               --no-restore
           }
+          
+          Write-Host "✅ Тестирование завершено!" -ForegroundColor Green
         } else {
           Write-Host "⚠️ Тестовые проекты не найдены" -ForegroundColor Yellow
-          # Создаем заглушку для отчета
+          # Создаем заглушку
           "<TestRun></TestRun>" | Out-File -FilePath "TestResults/no-tests.trx"
         }
-        
-        Write-Host "✅ Тестирование завершено!" -ForegroundColor Green
 
     - name: 📊 Сохраняем артефакты
-      shell: pwsh
-      run: |
-        Write-Host "📊 Сохраняем артефакты..." -ForegroundColor Green
-        
-        # Создаем временную папку для артефактов
-        New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-        
-        # 1. Копируем сборку
-        $buildDirs = Get-ChildItem -Recurse -Directory -Path "bin\Release\net8.0" -ErrorAction SilentlyContinue
-        if ($buildDirs.Count -gt 0) {
-          Write-Host "📦 Копируем сборку..." -ForegroundColor Cyan
-          foreach ($dir in $buildDirs) {
-            $destDir = "artifacts\build\$($dir.Parent.Parent.Parent.Name)"
-            New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-            Copy-Item -Path "$($dir.FullName)\*" -Destination $destDir -Recurse -Force
-            Write-Host "  ✅ Скопировано из $($dir.FullName)" -ForegroundColor Gray
-          }
-        }
-        
-        # 2. Копируем результаты тестов
-        if (Test-Path TestResults) {
-          Write-Host "📋 Копируем результаты тестов..." -ForegroundColor Cyan
-          Copy-Item -Path TestResults\* -Destination artifacts\test-results -Recurse -Force
-        }
-        
-        # 3. Показываем что получилось
-        Write-Host ""
-        Write-Host "📁 Содержимое artifacts:" -ForegroundColor Cyan
-        Get-ChildItem -Path artifacts -Recurse | ForEach-Object {
-          $indent = "  " * ($_.FullName.Split('\').Length - $PWD.Path.Split('\').Length - 1)
-          Write-Host "$indent📄 $($_.Name)" -ForegroundColor Gray
-        }
-
-    - name: 📤 Загружаем артефакты в GitHub
       uses: actions/upload-artifact@v4
       with:
-        name: blog-api-artifacts
-        path: artifacts/
+        name: build-artifacts
+        path: |
+          **/bin/Release/
+          TestResults/
         retention-days: 7
 
   # Джоба 2: Отчет
   report:
-    name: 📊 Итоговый отчет
+    name: 📊 Отчет о выполнении
     needs: build-and-test
     runs-on: windows-latest
     if: always()
 
     steps:
-    - name: 📝 Генерируем отчет
+    - name: 📝 Генерируем финальный отчет
       shell: pwsh
       run: |
-        Write-Host "================================================================" -ForegroundColor Cyan
-        Write-Host "              BLOG API ПАЙПЛАН ЗАВЕРШЕН! 🎉" -ForegroundColor Green
-        Write-Host "================================================================" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "📊 РЕЗУЛЬТАТЫ ВЫПОЛНЕНИЯ:" -ForegroundColor Yellow
-        Write-Host "  ✅ Сборка проекта - ${{ needs.build-and-test.result }}" -ForegroundColor $(if ('${{ needs.build-and-test.result }}' -eq 'success') { 'Green' } else { 'Red' })
-        Write-Host ""
-        Write-Host "🔧 ИНФОРМАЦИЯ:" -ForegroundColor Yellow
-        Write-Host "  • Ветка: ${{ github.ref }}" -ForegroundColor Gray
-        Write-Host "  • Коммит: ${{ github.sha }}" -ForegroundColor Gray
-        Write-Host "  • Инициатор: ${{ github.actor }}" -ForegroundColor Gray
-        Write-Host "  • Система: Windows" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "🕐 Время завершения: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
-        Write-Host ""
+        $status = '${{ needs.build-and-test.result }}'
+        $statusColor = if ($status -eq 'success') { 'Green' } else { 'Red' }
         
-        if ('${{ needs.build-and-test.result }}' -eq 'success') {
-          Write-Host "🎉 ВСЕ ЭТАПЫ ВЫПОЛНЕНЫ УСПЕШНО!" -ForegroundColor Green
-          Write-Host "📦 Артефакты доступны для скачивания" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "╔══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+        Write-Host "║                 ОТЧЕТ О ВЫПОЛНЕНИИ CI/CD                 ║" -ForegroundColor Cyan
+        Write-Host "╠══════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+        Write-Host "║                                                          ║" -ForegroundColor Cyan
+        Write-Host "║  📊 СТАТУС: " -NoNewline -ForegroundColor Cyan
+        Write-Host "$status" -ForegroundColor $statusColor
+        Write-Host "║                                                          ║" -ForegroundColor Cyan
+        Write-Host "║  📍 Ветка: ${{ github.ref }}" -ForegroundColor Gray
+        Write-Host "║  🔖 Коммит: ${{ github.sha }}" -ForegroundColor Gray
+        Write-Host "║  👤 Инициатор: ${{ github.actor }}" -ForegroundColor Gray
+        Write-Host "║  💻 Система: Windows" -ForegroundColor Gray
+        Write-Host "║                                                          ║" -ForegroundColor Cyan
+        Write-Host "║  🕐 Время: $(Get-Date -Format 'HH:mm:ss dd.MM.yyyy')" -ForegroundColor Gray
+        Write-Host "║                                                          ║" -ForegroundColor Cyan
+        
+        if ($status -eq 'success') {
+          Write-Host "║  🎉 ВСЕ ЭТАПЫ ВЫПОЛНЕНЫ УСПЕШНО!                    ║" -ForegroundColor Green
+          Write-Host "║  📦 Артефакты доступны для скачивания               ║" -ForegroundColor Cyan
         } else {
-          Write-Host "❌ ВЫПОЛНЕНИЕ ЗАВЕРШИЛОСЬ С ОШИБКОЙ" -ForegroundColor Red
-          Write-Host "⚠️ Проверьте логи выполнения" -ForegroundColor Yellow
+          Write-Host "║  ❌ ОБНАРУЖЕНЫ ПРОБЛЕМЫ!                              ║" -ForegroundColor Red
+          Write-Host "║  ⚠️ Проверьте логи выполнения                        ║" -ForegroundColor Yellow
         }
         
-        Write-Host "================================================================" -ForegroundColor Cyan
+        Write-Host "║                                                          ║" -ForegroundColor Cyan
+        Write-Host "╚══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+        Write-Host ""
